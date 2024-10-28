@@ -27,168 +27,61 @@ const availableAIs = [
 ];
 
 const { Menu, app, BrowserWindow, session } = require('electron');
-const prompt = require('electron-prompt');
-
 const fs = require('fs');
 const path = require('path');
 
 let win;
 let userSettings;
 
-const isMac = process.platform === "darwin";
-
-const defaultSettings = {
-  theme: "default.css",
-  streamer: false,
-  assistant: "ChatGPT",
-  activeSession: 'default',
-};
-
+// Chemin du répertoire de données de l'utilisateur
 const userDataPath = app.getPath('userData');
 const configPath = path.join(userDataPath, 'config.json');
-const sessionFile = path.join(userDataPath, 'sessions.json');
 
-function changeAssistant(label, url, save = true, killCookies = false) {
-  if (killCookies) {
-    win.webContents.session.clearStorageData({ storages: ['cookies'] });
-  }
-  win.loadURL(url);
-  if (save) {
-    let currentSettings = Object.assign({}, userSettings || loadUserPreferences());
-    const mutateConfig = Object.assign(currentSettings, { assistant: label });
-    userSettings = mutateConfig;
-    fs.writeFileSync(configPath, JSON.stringify(userSettings), 'utf-8');
-  }
+// Paramètres par défaut de l'application
+const defaultSettings = {
+  theme: "default.css",
+  assistant: "ChatGPT",
+};
+
+// Fonction pour changer d'assistant
+function changeAssistant(label, url) {
+  win.loadURL(url); // Charge l'URL de l'assistant sélectionné
+  let currentSettings = Object.assign({}, userSettings || loadUserPreferences());
+  currentSettings.assistant = label; // Met à jour l'assistant
+  userSettings = currentSettings;
+  fs.writeFileSync(configPath, JSON.stringify(userSettings), 'utf-8'); // Sauvegarde les paramètres
 }
 
+// Charge les préférences utilisateur à partir du fichier de configuration
 function loadUserPreferences() {
   if (fs.existsSync(configPath)) {
     const configFile = fs.readFileSync(configPath, 'utf-8');
     userSettings = JSON.parse(configFile);
     return userSettings;
   } else {
-    fs.writeFileSync(configPath, JSON.stringify(defaultSettings));
+    fs.writeFileSync(configPath, JSON.stringify(defaultSettings)); // Crée le fichier s'il n'existe pas
     return loadUserPreferences();
   }
 }
 
-function changeUserTheme(name, reload = false) {
+// Change le thème de l'application
+function changeUserTheme(name) {
   let currentSettings = Object.assign({}, userSettings || loadUserPreferences());
-  const mutateConfig = Object.assign(currentSettings, { theme: name });
-  userSettings = mutateConfig;
-  fs.writeFileSync(configPath, JSON.stringify(userSettings), 'utf-8');
+  currentSettings.theme = name; // Met à jour le thème
+  userSettings = currentSettings;
+  fs.writeFileSync(configPath, JSON.stringify(userSettings, null, 2), 'utf-8'); // Sauvegarde les paramètres
   const cssFile = path.join(userDataPath, name);
+  
+  // Charge le fichier CSS correspondant au thème
   if (fs.existsSync(cssFile)) {
     const cssContent = fs.readFileSync(cssFile, 'utf8');
-    win.webContents.insertCSS(cssContent);
-  } else {
-    fs.writeFileSync(cssFile, "");
-    win.reload();
-  }
-  if (reload) win.reload();
-}
-
-function toggleStreamer() {
-  let currentSettings = Object.assign({}, userSettings || loadUserPreferences());
-  const mutateConfig = Object.assign(currentSettings, { streamer: !currentSettings.streamer });
-  userSettings = mutateConfig;
-  fs.writeFileSync(configPath, JSON.stringify(userSettings), 'utf-8');
-  win.reload();
-}
-
-function fetchThemes() {
-  const cssFiles = fs.readdirSync(userDataPath)
-    .filter(file => path.extname(file) === '.css')
-    .map(label => label);
-  return cssFiles || ["default.css"];
-}
-
-function getSessions() {
-  if (fs.existsSync(sessionFile)) {
-    const sessions = JSON.parse(fs.readFileSync(sessionFile));
-    return sessions || {};
-  } else {
-    fs.writeFileSync(sessionFile, '{}', 'utf-8');
-    return getSessions();
+    win.webContents.insertCSS(cssContent); // Applique le CSS
   }
 }
 
-function getSessionsNames() {
-  return Object.keys(getSessions() || {}) || [];
-}
-
-function removeSession(name) {
-  const mutableSession = getSessions() || {};
-  if (mutableSession[name]) {
-    delete mutableSession[name];
-    fs.writeFileSync(sessionFile, JSON.stringify(mutableSession), 'utf-8');
-    setTimeout(() => win.reload(), 1000);
-  }
-}
-
-function storeSession(name, session) {
-  if (Object.keys(session).length) {
-    const mutableSession = getSessions() || {};
-    session.cookies.get({}).then((cookies) => {
-      mutableSession[name] = { cookies };
-      fs.writeFileSync(sessionFile, JSON.stringify(mutableSession), 'utf-8');
-    });
-  }
-}
-
-function loadSession(name, session) {
-  const existingSessions = getSessions();
-  const cookies = existingSessions[name]?.cookies || [];
-  session.clearStorageData();
-  cookies.forEach((cookie) => {
-    const url = `https://${cookie.domain.replace(/^\./, '')}`;
-    if (cookie.name.startsWith('__Secure-')) cookie.secure = true;
-    if (cookie.name.startsWith('__Host-')) {
-      cookie.secure = true;
-      cookie.path = '/';
-      delete cookie.domain;
-      delete cookie.sameSite;
-    }
-    session.cookies.set({
-      url,
-      name: cookie.name,
-      value: cookie.value,
-      domain: cookie.domain,
-      path: cookie.path,
-      secure: cookie.secure,
-      httpOnly: cookie.httpOnly,
-      expirationDate: cookie.expirationDate
-    }).catch(console.error);
-  });
-  win.reload();
-}
-
-function initializeDefaultSession() {
-  const sessions = getSessions();
-  if (!sessions.default) {
-    storeSession('default', session.defaultSession);
-  }
-  loadSession('default', session.defaultSession);
-}
-
+// Génére le menu de l'application
 function generateMenu() {
-  const sessionMenuTemplate = [
-    ...(isMac ? [{
-      label: app.name,
-      submenu: [{ role: 'quit' }]
-    }] : []),
-    ...(isMac ? [{
-      label: 'Edit',
-      submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
-        { type: 'separator' },
-        { role: 'cut' },
-        { role: 'copy' },
-        { role: 'paste' },
-        { role: 'selectAll' }
-      ]
-    }] : []),
+  const menuTemplate = [
     {
       label: "Change AI",
       submenu: availableAIs.map(({ label, url }) => ({
@@ -196,91 +89,58 @@ function generateMenu() {
         type: "radio",
         checked: (userSettings.assistant || defaultSettings.assistant) === label,
         click() {
-          changeAssistant(label, url, true);
+          changeAssistant(label, url);
         }
       })),
-    },
-    {
-      label: `Sessions${userSettings.streamer ? '' : ' (Active: ' + (userSettings.activeSession || 'default') + ')'}`,
-      submenu: [
-        ...getSessionsNames().map((name) => ({
-          label: name,
-          type: "radio",
-          checked: userSettings.activeSession === name,
-          click() {
-            userSettings.activeSession = name;
-            fs.writeFileSync(configPath, JSON.stringify(userSettings), 'utf-8');
-            loadSession(name, session.defaultSession);
-          }
-        })),
-        { type: "separator" },
-        {
-          label: "Save Current Session",
-          click: async () => {
-            const ask = () => {
-              prompt({
-                title: 'Saving Current Session',
-                label: 'Please choose a name:',
-                inputAttrs: { type: 'text' },
-                type: 'input'
-              }).then((text) => {
-                if (text) {
-                  storeSession(text, session.defaultSession);
-                  userSettings.activeSession = text;
-                  fs.writeFileSync(configPath, JSON.stringify(userSettings), 'utf-8');
-                } else ask();
-              }).catch(console.error);
-            };
-            ask();
-          }
-        },
-        {
-          label: "Delete A Session",
-          click: async () => {
-            const ask = () => {
-              prompt({
-                title: 'Delete A Session',
-                label: 'Enter the EXACT NAME to remove:',
-                inputAttrs: { type: 'text' },
-                type: 'input'
-              }).then((text) => {
-                if (text) removeSession(text);
-                else ask();
-              }).catch(console.error);
-            };
-            ask();
-          }
-        }
-      ]
     },
     {
       label: 'Theme',
       submenu: fetchThemes().map(str => ({
         label: str,
         click() {
-          changeUserTheme(str, true);
+          changeUserTheme(str);
         }
       })),
     },
+    // Ajout des options de navigation
     {
-      label: 'Options',
+      label: 'Navigation',
       submenu: [
         {
-          label: "Streamer mode",
-          type: "checkbox",
-          checked: loadUserPreferences().streamer,
+          label: 'Page Précédente',
           click() {
-            toggleStreamer();
+            win.webContents.goBack(); // Retourne à la page précédente
+          }
+        },
+        {
+          label: 'Page Suivante',
+          click() {
+            win.webContents.goForward(); // Avance à la page suivante
+          }
+        },
+        {
+          label: 'Inspecter',
+          click() {
+            win.webContents.openDevTools(); // Ouvre les outils de développement
           }
         }
       ]
     }
   ];
 
-  const menu = Menu.buildFromTemplate(sessionMenuTemplate);
+  const menu = Menu.buildFromTemplate(menuTemplate);
   Menu.setApplicationMenu(menu);
 }
 
+// Charge les thèmes disponibles
+function fetchThemes() {
+  const cssFiles = fs.readdirSync(userDataPath)
+    .filter(file => path.extname(file) === '.css') // Filtre les fichiers CSS
+    .map(label => label);
+  return cssFiles || ["default.css"]; // Retourne la liste des thèmes
+}
+
+// Fonction pour créer la fenêtre de l'application
 function createWindow() {
   win = new BrowserWindow({
     width: 800,
@@ -291,37 +151,46 @@ function createWindow() {
       nodeIntegration: true,
       enableRemoteModule: true,
       webviewTag: true,
-      session: session.defaultSession
+      session: session.defaultSession // Utilise la session par défaut
     }
   });
 
-  loadUserPreferences();
-  initializeDefaultSession();
-  generateMenu();
+  loadUserPreferences(); // Charge les préférences utilisateur
+  generateMenu(); // Génère le menu de l'application
 
+  // Charge l'assistant par défaut
   const label = userSettings.assistant || defaultSettings.assistant;
-  const { url } = availableAIs.find(ai => ai.label === label);
-  changeAssistant(label, url, false);
+  const url = availableAIs.find(ai => ai.label === label).url;
+  win.loadURL(url); // Charge l'URL de l'assistant
 
+  // Lors du chargement du contenu
   win.webContents.on('did-finish-load', () => {
-    generateMenu();
-    changeUserTheme(userSettings.theme);
+    const hideCssRules = [
+      "body div#app",
+      "body div.threads div.main-content",
+      "body div.text-xs > div",
+    ];
+    
+    // Applique des règles CSS pour masquer certains éléments
+    hideCssRules.forEach((rule) => {
+      win.webContents.insertCSS(`${rule} { display: none !important; }`);
+    });
+    
+    // Charge le thème utilisateur
+    changeUserTheme(userSettings.theme || defaultSettings.theme);
+  });
 
-    if (userSettings.streamer) {
-      const hideCssRules = [
-        "body div.composer-parent div.draggable",
-        "body div.threads div.main-content",
-        "body div.text-xs > div",
-      ];
-      win.webContents.insertCSS(`${hideCssRules.join(", ")} { display: none !important; }`);
-    }
+  // Événement lorsque la fenêtre est fermée
+  win.on('closed', () => {
+    win = null;
   });
 }
 
-app.whenReady().then(createWindow);
+// Événements de l'application
+app.on('ready', createWindow);
 app.on('window-all-closed', () => {
-  if (!isMac) app.quit();
+  app.quit(); // Quitte l'application lorsque toutes les fenêtres sont fermées
 });
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  if (win === null) createWindow(); // Crée une nouvelle fenêtre si l'application est activée
 });
