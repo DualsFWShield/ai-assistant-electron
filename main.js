@@ -16,6 +16,14 @@ const availableAIs = [
     label: "MistralAI",
     url: 'https://chat.mistral.ai/chat'
   },
+  {
+    label: "Claude",
+    url: 'https://claude.ai/new'
+  },
+  {
+    label: "Gemini",
+    url: 'https://gemini.google.com/app?hl=fr'
+  },
 ]
 
 const { Menu, app, BrowserWindow, session } = require('electron');
